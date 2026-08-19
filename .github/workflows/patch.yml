@@ -37,17 +37,20 @@ jobs:
           curl -L -o oneloader.zip "$LATEST_URL"
           unzip oneloader.zip -d oneloader_files
 
-      - name: Locate Game Root & Inject OneLoader
+      - name: Safely Inject OneLoader Files
         run: |
-          # Find the exact directory containing index.html inside assets
+          # Locate the game web root directory where index.html resides
           GAME_DIR=$(find omori_decompiled/assets -name "index.html" -exec dirname {} \;)
-          echo "Found game web root at: $GAME_DIR"
-          
-          # Copy OneLoader files into that exact directory
-          cp -r oneloader_files/* "$GAME_DIR"/
-          
-          # Ensure the mods folder exists inside the game root
+          echo "Game root found at: $GAME_DIR"
+
+          # Copy modloader folder and mods folder directly
+          cp -r oneloader_files/modloader "$GAME_DIR/"
           mkdir -p "$GAME_DIR/mods"
+
+          # Inject OneLoader script reference into existing index.html instead of overwriting it
+          if ! grep -q "modloader/main.js" "$GAME_DIR/index.html"; then
+            sed -i 's|</head>|<script type="text/javascript" src="modloader/main.js"></script></head>|g' "$GAME_DIR/index.html"
+          fi
 
       - name: Rebuild APK
         run: |
