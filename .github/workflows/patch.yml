@@ -1,0 +1,60 @@
+name: Patch OMORI with OneLoader
+
+on:
+  workflow_dispatch:
+
+jobs:
+  patch-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Install Android Build Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apktool apksigner zipalign curl unzip
+
+      - name: Download OMORI APK
+        run: |
+          # Fetch APK using a browser User-Agent to bypass download protection
+          curl -L -A "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15" \
+            -o omori.apk "https://apkvision.org/games/adventure/omori-117163/download/v1.0.8.1-apk/"
+
+      - name: Decompile OMORI APK
+        run: |
+          apktool d omori.apk -o omori_decompiled
+
+      - name: Fetch Latest OneLoader Release
+        run: |
+          LATEST_URL=$(curl -s https://api.github.com/repos/rphsoftware/OneLoader/releases/latest | grep "browser_download_url" | cut -d '"' -f 4)
+          curl -L -o oneloader.zip "$LATEST_URL"
+          unzip oneloader.zip -d oneloader_files
+
+      - name: Inject OneLoader into Game Assets
+        run: |
+          mkdir -p omori_decompiled/assets/www/
+          cp -r oneloader_files/* omori_decompiled/assets/www/
+
+      - name: Rebuild APK
+        run: |
+          apktool b omori_decompiled -o omori_unsigned.apk
+
+      - name: Create Key and Sign APK
+        run: |
+          keytool -genkey -v -keystore debug.keystore -storepass android -alias debugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          zipalign -v 4 omori_unsigned.apk omori_aligned.apk
+          apksigner sign --ks debug.keystore --ks-pass pass:android --key-pass pass:android --out omori-oneloader-signed.apk omori_aligned.apk
+
+      - name: Upload Modded APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: OMORI-OneLoader-APK
+          path: omori-oneloader-signed.apk
