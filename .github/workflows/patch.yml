@@ -17,16 +17,15 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Install Android Build Tools
+      - name: Install Android Build Tools & gdown
         run: |
           sudo apt-get update
-          sudo apt-get install -y apktool apksigner zipalign curl unzip
+          sudo apt-get install -y apktool apksigner zipalign curl unzip python3-pip
+          pip3 install gdown
 
       - name: Download OMORI APK from Google Drive
         run: |
-          # Replace YOUR_DRIVE_FILE_ID with your actual Google Drive File ID
-          # Example: if your share link is drive.google.com/file/d/1a2b3c4d/view, use 1a2b3c4d
-          curl -L "https://drive.google.com/uc?export=download&id=YOUR_DRIVE_FILE_ID" -o omori.apk
+          gdown "https://drive.google.com/uc?id=1tUT0FIeLeB3odSzXnhlViTKIuGPgu2BF" -O omori.apk
 
       - name: Decompile OMORI APK
         run: |
