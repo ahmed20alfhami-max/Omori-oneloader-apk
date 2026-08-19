@@ -27,9 +27,8 @@ jobs:
         run: |
           gdown "https://drive.google.com/uc?id=1tUT0FIeLeB3odSzXnhlViTKIuGPgu2BF" -O omori.apk
 
-      - name: Unpack OMORI APK (Assets Only)
+      - name: Unpack OMORI APK
         run: |
-          # Use -r and -s to avoid decompiling resources and dex code to prevent rebuild errors
           apktool d -r -s omori.apk -o omori_decompiled
 
       - name: Fetch Latest OneLoader Release
@@ -38,10 +37,17 @@ jobs:
           curl -L -o oneloader.zip "$LATEST_URL"
           unzip oneloader.zip -d oneloader_files
 
-      - name: Inject OneLoader into Game Assets
+      - name: Locate Game Root & Inject OneLoader
         run: |
-          mkdir -p omori_decompiled/assets/www/
-          cp -r oneloader_files/* omori_decompiled/assets/www/
+          # Find the exact directory containing index.html inside assets
+          GAME_DIR=$(find omori_decompiled/assets -name "index.html" -exec dirname {} \;)
+          echo "Found game web root at: $GAME_DIR"
+          
+          # Copy OneLoader files into that exact directory
+          cp -r oneloader_files/* "$GAME_DIR"/
+          
+          # Ensure the mods folder exists inside the game root
+          mkdir -p "$GAME_DIR/mods"
 
       - name: Rebuild APK
         run: |
