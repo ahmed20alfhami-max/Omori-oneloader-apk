@@ -22,11 +22,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y apktool apksigner zipalign curl unzip
 
-      - name: Download OMORI APK
+      - name: Download OMORI APK from Google Drive
         run: |
-          # Fetch APK using a browser User-Agent to bypass download protection
-          curl -L -A "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15" \
-            -o omori.apk "https://apkvision.org/games/adventure/omori-117163/download/v1.0.8.1-apk/"
+          # Replace YOUR_DRIVE_FILE_ID with your actual Google Drive File ID
+          # Example: if your share link is drive.google.com/file/d/1a2b3c4d/view, use 1a2b3c4d
+          curl -L "https://drive.google.com/uc?export=download&id=YOUR_DRIVE_FILE_ID" -o omori.apk
 
       - name: Decompile OMORI APK
         run: |
