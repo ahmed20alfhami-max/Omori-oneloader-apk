@@ -30,22 +30,10 @@ jobs:
         run: |
           gdown "https://drive.google.com/uc?id=1tUT0FIeLeB3odSzXnhlViTKIuGPgu2BF" -O omori.apk
 
-      - name: Unpack OMORI APK
+      - name: Unpack OMORI APK (Prevent Resource Errors)
         run: |
-          apktool d -s omori.apk -o omori_decompiled
-
-      - name: Configure Package Name & Force Landscape Mode
-        run: |
-          # Update package name
-          OLD_PKG=$(grep -oP 'package="\K[^"]+' omori_decompiled/AndroidManifest.xml)
-          echo "Original package name: $OLD_PKG"
-          sed -i 's/package="'"$OLD_PKG"'"/package="omocat.omoriahamd.com"/g' omori_decompiled/AndroidManifest.xml
-          
-          # Force landscape orientation for all activities
-          sed -i 's/android:screenOrientation="[^"]*"/android:screenOrientation="sensorLandscape"/g' omori_decompiled/AndroidManifest.xml
-          if ! grep -q 'android:screenOrientation=' omori_decompiled/AndroidManifest.xml; then
-            sed -i 's/<activity /<activity android:screenOrientation="sensorLandscape" /g' omori_decompiled/AndroidManifest.xml
-          fi
+          # Use -r and -s to bypass resource/dex recompilation entirely
+          apktool d -r -s omori.apk -o omori_decompiled
 
       - name: Fetch Latest OneLoader Release
         run: |
@@ -53,13 +41,13 @@ jobs:
           curl -L -o oneloader.zip "$LATEST_URL"
           unzip oneloader.zip -d oneloader_files
 
-      - name: Inject OneLoader & Fix Viewport Scale
+      - name: Inject OneLoader & Force Fullscreen Landscape HTML
         run: |
-          # Find directory containing index.html inside decompiled assets
+          # Find directory containing index.html inside assets
           GAME_DIR=$(find omori_decompiled/assets -name "index.html" -exec dirname {} \;)
           echo "Game root is: $GAME_DIR"
 
-          # Determine OneLoader source path (supports root or www/ subfolder)
+          # Support both root and www/ subfolder structures from OneLoader release
           if [ -d "oneloader_files/www" ]; then
             SRC_DIR="oneloader_files/www"
           else
@@ -70,10 +58,11 @@ jobs:
           cp -r "$SRC_DIR"/* "$GAME_DIR"/
           mkdir -p "$GAME_DIR/mods"
 
-          # Ensure full-width viewport meta tag is injected into index.html
-          if ! grep -q 'name="viewport"' "$GAME_DIR/index.html"; then
-            sed -i 's|</head>|<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"></head>|g' "$GAME_DIR/index.html"
-          fi
+          # Inject full width viewport meta tag & CSS for forced landscape aspect scaling
+          LANDSCAPE_CSS="<style>html, body { width: 100vw; height: 100vh; margin: 0; padding: 0; overflow: hidden; background: #000; }</style>"
+          VIEWPORT_META='<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">'
+          
+          sed -i "s|</head>|${VIEWPORT_META}${LANDSCAPE_CSS}</head>|g" "$GAME_DIR/index.html"
 
       - name: Rebuild APK
         run: |
@@ -92,9 +81,8 @@ jobs:
           name: OMORI OneLoader Build #${{ github.run_number }}
           body: |
             Automated OMORI OneLoader build.
-            - Package Name: `omocat.omoriahamd.com`
             - Output File: `omori-oneloader.apk`
-            - Screen Mode: Landscape Forced with Viewport Scaling
+            - Screen Display: Fullscreen 100vw/100vh Landscape Viewport
           files: omori-oneloader.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
