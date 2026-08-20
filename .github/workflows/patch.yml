@@ -3,6 +3,9 @@ name: Patch OMORI with OneLoader
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   patch-apk:
     runs-on: ubuntu-latest
@@ -29,8 +32,16 @@ jobs:
 
       - name: Unpack OMORI APK
         run: |
-          # Decompile without -s so AndroidManifest.xml can be safely modified
-          apktool d -r omori.apk -o omori_decompiled
+          # Decompile APK with manifest parsing enabled so package name can be updated
+          apktool d -s omori.apk -o omori_decompiled
+
+      - name: Update Package / Bundle Name
+        run: |
+          # Replaces original package name in AndroidManifest.xml with omocat.omoriahamd.com
+          OLD_PKG=$(grep -oP 'package="\K[^"]+' omori_decompiled/AndroidManifest.xml)
+          echo "Original package name: $OLD_PKG"
+          sed -i 's/package="'"$OLD_PKG"'"/package="omocat.omoriahamd.com"/g' omori_decompiled/AndroidManifest.xml
+          echo "Updated package name to: omocat.omoriahamd.com"
 
       - name: Fetch Latest OneLoader Release
         run: |
@@ -38,32 +49,19 @@ jobs:
           curl -L -o oneloader.zip "$LATEST_URL"
           unzip oneloader.zip -d oneloader_files
 
-      - name: Inject OneLoader & Fix Display Layout
+      - name: Inject OneLoader
         run: |
-          # Locate game root asset directory containing index.html
+          # Find directory containing index.html inside decompiled assets
           GAME_DIR=$(find omori_decompiled/assets -name "index.html" -exec dirname {} \;)
-          echo "Game root found at: $GAME_DIR"
+          echo "Game root is: $GAME_DIR"
 
-          # Safely copy OneLoader assets (handling either www/ layout or root layout)
-          if [ -d "oneloader_files/www" ]; then
-            cp -r oneloader_files/www/* "$GAME_DIR/"
-          else
-            cp -r oneloader_files/* "$GAME_DIR/"
-          fi
-
-          # Ensure the mods directory exists
+          # Copy modloader scripts and mods directory
+          cp -r oneloader_files/modloader "$GAME_DIR/"
           mkdir -p "$GAME_DIR/mods"
 
-          # Force viewport meta tag for full Android screen width scaling
-          if grep -q '<meta name="viewport"' "$GAME_DIR/index.html"; then
-            sed -i 's|<meta name="viewport"[^>]*>|<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">|g' "$GAME_DIR/index.html"
-          else
-            sed -i 's|</head>|<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"></head>|g' "$GAME_DIR/index.html"
-          fi
-
-          # Force landscape orientation inside AndroidManifest.xml
-          if [ -f "omori_decompiled/AndroidManifest.xml" ]; then
-            sed -i 's/android:screenOrientation="[^"]*"/android:screenOrientation="sensorLandscape"/g' omori_decompiled/AndroidManifest.xml
+          # Link modloader inside index.html without replacing the app startup script
+          if ! grep -q "modloader/main.js" "$GAME_DIR/index.html"; then
+            sed -i 's|</head>|<script type="text/javascript" src="modloader/main.js"></script></head>|g' "$GAME_DIR/index.html"
           fi
 
       - name: Rebuild APK
@@ -74,10 +72,17 @@ jobs:
         run: |
           keytool -genkey -v -keystore debug.keystore -storepass android -alias debugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           zipalign -v 4 omori_unsigned.apk omori_aligned.apk
-          apksigner sign --ks debug.keystore --ks-pass pass:android --key-pass pass:android --out omori-oneloader-signed.apk omori_aligned.apk
+          apksigner sign --ks debug.keystore --ks-pass pass:android --key-pass pass:android --out omori-oneloader.apk omori_aligned.apk
 
-      - name: Upload Modded APK
-        uses: actions/upload-artifact@v4
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: OMORI-OneLoader-APK
-          path: omori-oneloader-signed.apk
+          tag_name: v1.0.0-${{ github.run_number }}
+          name: OMORI OneLoader Build #${{ github.run_number }}
+          body: |
+            Automated OMORI OneLoader build.
+            - Package Name: `omocat.omoriahamd.com`
+            - Output File: `omori-oneloader.apk`
+          files: omori-oneloader.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
