@@ -29,7 +29,8 @@ jobs:
 
       - name: Unpack OMORI APK
         run: |
-          apktool d -r -s omori.apk -o omori_decompiled
+          # Decompile without -s so AndroidManifest.xml can be safely modified
+          apktool d -r omori.apk -o omori_decompiled
 
       - name: Fetch Latest OneLoader Release
         run: |
@@ -37,19 +38,32 @@ jobs:
           curl -L -o oneloader.zip "$LATEST_URL"
           unzip oneloader.zip -d oneloader_files
 
-      - name: Inject OneLoader
+      - name: Inject OneLoader & Fix Display Layout
         run: |
-          # Find directory containing index.html inside decompiled assets
+          # Locate game root asset directory containing index.html
           GAME_DIR=$(find omori_decompiled/assets -name "index.html" -exec dirname {} \;)
-          echo "Game root is: $GAME_DIR"
+          echo "Game root found at: $GAME_DIR"
 
-          # Copy modloader scripts and mods directory
-          cp -r oneloader_files/modloader "$GAME_DIR/"
+          # Safely copy OneLoader assets (handling either www/ layout or root layout)
+          if [ -d "oneloader_files/www" ]; then
+            cp -r oneloader_files/www/* "$GAME_DIR/"
+          else
+            cp -r oneloader_files/* "$GAME_DIR/"
+          fi
+
+          # Ensure the mods directory exists
           mkdir -p "$GAME_DIR/mods"
 
-          # Link modloader inside index.html without replacing the app startup script
-          if ! grep -q "modloader/main.js" "$GAME_DIR/index.html"; then
-            sed -i 's|</head>|<script type="text/javascript" src="modloader/main.js"></script></head>|g' "$GAME_DIR/index.html"
+          # Force viewport meta tag for full Android screen width scaling
+          if grep -q '<meta name="viewport"' "$GAME_DIR/index.html"; then
+            sed -i 's|<meta name="viewport"[^>]*>|<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">|g' "$GAME_DIR/index.html"
+          else
+            sed -i 's|</head>|<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"></head>|g' "$GAME_DIR/index.html"
+          fi
+
+          # Force landscape orientation inside AndroidManifest.xml
+          if [ -f "omori_decompiled/AndroidManifest.xml" ]; then
+            sed -i 's/android:screenOrientation="[^"]*"/android:screenOrientation="sensorLandscape"/g' omori_decompiled/AndroidManifest.xml
           fi
 
       - name: Rebuild APK
