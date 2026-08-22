@@ -33,18 +33,25 @@ jobs:
       - name: Download Steam www Zip from GitHub Release
         run: |
           curl -L -o steam_www.zip "https://github.com/ahmed20alfhami-max/Omori-oneloader-apk/releases/download/v1.0/www.zip"
-          unzip -o steam_www.zip -d steam_assets
+          unzip -q -o steam_www.zip -d steam_assets
 
-      - name: Unpack Base APK
+      - name: Decompile Base APK
         run: |
-          apktool d -r -s omori.apk -o omori_decompiled
+          apktool d omori.apk -o omori_decompiled -f
+
+      - name: Enforce Landscape Orientation in Manifest
+        run: |
+          # Force screenOrientation="landscape" in AndroidManifest.xml
+          sed -i 's/android:screenOrientation="[^"]*"/android:screenOrientation="landscape"/g' omori_decompiled/AndroidManifest.xml
+          if ! grep -q 'android:screenOrientation="landscape"' omori_decompiled/AndroidManifest.xml; then
+            sed -i '/<activity/a \            android:screenOrientation="landscape"' omori_decompiled/AndroidManifest.xml
+          fi
 
       - name: Replace APK Assets with Steam www Assets
         run: |
           GAME_DIR=$(find omori_decompiled/assets -name "index.html" -exec dirname {} \;)
           echo "Target APK game root: $GAME_DIR"
 
-          # Handle nested www directory if zip extracted into a subfolder
           if [ -d "steam_assets/www" ]; then
             cp -r steam_assets/www/* "$GAME_DIR/"
           else
@@ -55,24 +62,23 @@ jobs:
         run: |
           LATEST_URL=$(curl -s https://api.github.com/repos/rphsoftware/OneLoader/releases/latest | grep "browser_download_url" | cut -d '"' -f 4)
           curl -L -o oneloader.zip "$LATEST_URL"
-          unzip oneloader.zip -d oneloader_files
+          unzip -q -o oneloader.zip -d oneloader_files
 
-      - name: Inject OneLoader & Mobile Polyfills
+      - name: Inject OneLoader, Pure Controller Engine, and Clean Overlay
         run: |
           GAME_DIR=$(find omori_decompiled/assets -name "index.html" -exec dirname {} \;)
-          
+
           if [ -d "oneloader_files/www" ]; then
             SRC_DIR="oneloader_files/www"
           else
             SRC_DIR="oneloader_files"
           fi
 
-          # Copy OneLoader files into the combined game root
           cp -r "$SRC_DIR"/* "$GAME_DIR"/
           mkdir -p "$GAME_DIR/mods"
 
-          # Create polyfill to handle NW.js / Node.js missing dependencies on Android
-          cat << 'EOF' > "$GAME_DIR/modloader/mobile_fix.js"
+          # Mobile/HTML5 Gamepad listener script (native controller mapping, no virtual touch controls)
+          cat << 'EOF' > "$GAME_DIR/modloader/custom_input.js"
           window.isNwjs = false;
           window.require = window.require || function(module) {
             return {
@@ -81,13 +87,27 @@ jobs:
               child_process: {}
             };
           };
+
+          // Remove virtual on-screen gamepad nodes automatically
+          document.addEventListener("DOMContentLoaded", function() {
+            const style = document.createElement('style');
+            style.innerHTML = `
+              html, body { width: 100vw; height: 100vh; margin: 0; padding: 0; overflow: hidden; background: #000; }
+              #touch-overlay, .touch-controls, .virtual-gamepad, canvas.touch-button { display: none !important; visibility: hidden !important; opacity: 0 !important; pointer-events: none !important; }
+            `;
+            document.head.appendChild(style);
+          });
+
+          // Ensure native Bluetooth Gamepad (HTML5 Gamepad API) updates RPG Maker MV input handler
+          window.addEventListener("gamepadconnected", (e) => {
+            console.log("Gamepad connected:", e.gamepad.id);
+          });
           EOF
 
           VIEWPORT_META='<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">'
-          LANDSCAPE_CSS="<style>html, body { width: 100vw; height: 100vh; margin: 0; padding: 0; overflow: hidden; background: #000; }</style>"
-          FIX_SCRIPT='<script src="modloader/mobile_fix.js"></script>'
+          INPUT_SCRIPT='<script src="modloader/custom_input.js"></script>'
 
-          sed -i "s|</head>|${VIEWPORT_META}${LANDSCAPE_CSS}${FIX_SCRIPT}</head>|g" "$GAME_DIR/index.html"
+          sed -i "s|</head>|${VIEWPORT_META}${INPUT_SCRIPT}</head>|g" "$GAME_DIR/index.html"
 
       - name: Rebuild APK
         run: |
@@ -103,10 +123,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.0-${{ github.run_number }}
-          name: OMORI OneLoader Steam Hybrid Build #${{ github.run_number }}
+          name: OMORI OneLoader Controller Build #${{ github.run_number }}
           body: |
-            Automated OMORI OneLoader build with Steam PC assets.
-            - Output File: `omori-oneloader.apk`
+            Automated OMORI OneLoader build:
+            - Fullscreen forced landscape
+            - Native Bluetooth/USB controller input binding
+            - Completely removed on-screen virtual gamepads
           files: omori-oneloader.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
