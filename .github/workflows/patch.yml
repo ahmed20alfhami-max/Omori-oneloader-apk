@@ -47,54 +47,66 @@ jobs:
           mkdir -p oneloader_files
           unzip -q -o oneloader.zip -d oneloader_files
 
-      - name: Merge Assets, OneLoader, Controller Config & Landscape Mode Lol
+      - name: Merge Assets, Fix 50% Loading Freeze & Enable Controller
         run: |
-          # 1. Locate APK game root
+          # Locate game directories
           APK_GAME_DIR=$(find omori_decompiled/assets -name "index.html" | head -n 1 | xargs dirname)
-          echo "Target APK game root: $APK_GAME_DIR"
-
-          # 2. Locate extracted Steam www root containing index.html or data folder
           STEAM_DIR=$(find steam_assets -name "data" -type d | head -n 1 | xargs dirname)
           if [ -z "$STEAM_DIR" ]; then
             STEAM_DIR=$(find steam_assets -name "index.html" | head -n 1 | xargs dirname)
           fi
-          echo "Found Steam source root at: $STEAM_DIR"
 
-          # Copy Steam assets to APK game root
+          # Copy Steam files into APK root
           cp -r "$STEAM_DIR"/* "$APK_GAME_DIR"/
 
-          # 3. Locate OneLoader source root
+          # Copy OneLoader assets
           ONELOADER_DIR=$(find oneloader_files -name "modloader" -type d | head -n 1 | xargs dirname)
-          echo "Found OneLoader root at: $ONELOADER_DIR"
           cp -r "$ONELOADER_DIR"/* "$APK_GAME_DIR"/
           mkdir -p "$APK_GAME_DIR/mods"
 
-          # 4. Inject mobile polyfill, remove touch controllers, enable Bluetooth gamepad
-          cat << 'EOF' > "$APK_GAME_DIR/modloader/custom_input.js"
-          window.isNwjs = false;
-          window.require = window.require || function(module) {
-            return {
-              fs: { readFileSync: function(){}, writeFileSync: function(){}, existsSync: function(){ return false; } },
-              path: { join: function(){ return ""; }, resolve: function(){ return ""; } },
-              child_process: {}
+          # Inject Webview CORS + File System Polyfill to unstick OneLoader 50%
+          cat << 'EOF' > "$APK_GAME_DIR/modloader/mobile_fix.js"
+          (function() {
+            window.isNwjs = false;
+            window.nw = null;
+            
+            // Polyfill Node fs for Android WebView
+            window.require = function(mod) {
+              if (mod === 'fs') {
+                return {
+                  readFileSync: function() { return ''; },
+                  writeFileSync: function() {},
+                  existsSync: function() { return true; },
+                  readdirSync: function() { return []; },
+                  statSync: function() { return { isDirectory: function() { return false; } }; }
+                };
+              }
+              if (mod === 'path') {
+                return {
+                  join: function() { return Array.prototype.slice.call(arguments).join('/'); },
+                  resolve: function() { return Array.prototype.slice.call(arguments).join('/'); }
+                };
+              }
+              return {};
             };
-          };
 
-          // Completely hide virtual touch gamepads/overlays
-          document.addEventListener("DOMContentLoaded", function() {
-            const style = document.createElement('style');
-            style.innerHTML = `
-              html, body { width: 100vw; height: 100vh; margin: 0; padding: 0; overflow: hidden; background: #000; }
-              #touch-overlay, .touch-controls, .virtual-gamepad, canvas.touch-button, #VirtualGamepad { display: none !important; visibility: hidden !important; opacity: 0 !important; pointer-events: none !important; }
-            `;
-            document.head.appendChild(style);
-          });
+            // Force hide virtual gamepads and touch overlays
+            document.addEventListener("DOMContentLoaded", function() {
+              const style = document.createElement('style');
+              style.innerHTML = `
+                html, body { width: 100vw; height: 100vh; margin: 0; padding: 0; overflow: hidden; background: #000; }
+                #touch-overlay, .touch-controls, .virtual-gamepad, canvas.touch-button, #VirtualGamepad, #onscreen-controls { display: none !important; visibility: hidden !important; opacity: 0 !important; pointer-events: none !important; }
+              `;
+              document.head.appendChild(style);
+            });
+          })();
           EOF
 
+          # Place fix script FIRST before any other JS loads in index.html
           VIEWPORT_META='<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">'
-          INPUT_SCRIPT='<script src="modloader/custom_input.js"></script>'
+          FIX_SCRIPT='<script src="modloader/mobile_fix.js"></script>'
 
-          sed -i "s|</head>|${VIEWPORT_META}${INPUT_SCRIPT}</head>|g" "$APK_GAME_DIR/index.html"
+          sed -i "s|<head>|<head>${VIEWPORT_META}${FIX_SCRIPT}|g" "$APK_GAME_DIR/index.html"
 
       - name: Rebuild APK
         run: |
@@ -113,10 +125,10 @@ jobs:
           name: OMORI OneLoader Controller Build #${{ github.run_number }}
           body: |
             Automated OMORI OneLoader build:
-            - Steam assets merged
+            - Resolved 50% loader hang via Webview polyfill
+            - Steam assets integrated
             - Fullscreen landscape mode enabled
-            - Virtual touch controls removed
-            - Physical/Bluetooth controller input active
+            - Virtual touch controls removed (Physical Controller support active)
           files: omori-oneloader.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
