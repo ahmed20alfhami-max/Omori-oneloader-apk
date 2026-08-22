@@ -1,4 +1,4 @@
-name: Patch OMORI with OneLoader
+name: Patch OMORI with OneLoader (Steam Assets)
 
 on:
   workflow_dispatch:
@@ -26,13 +26,25 @@ jobs:
           sudo apt-get install -y apktool apksigner zipalign curl unzip python3-pip
           pip3 install gdown
 
-      - name: Download OMORI APK from Google Drive
+      - name: Download OMORI Base APK
         run: |
           gdown "https://drive.google.com/uc?id=1tUT0FIeLeB3odSzXnhlViTKIuGPgu2BF" -O omori.apk
 
-      - name: Unpack OMORI APK
+      - name: Download Steam www Folder from Google Drive
+        run: |
+          gdown --folder "https://drive.google.com/drive/folders/1gW5TYM9weoCDOGIFEH34u1epFyZ31GYY" -O steam_assets
+
+      - name: Unpack Base APK
         run: |
           apktool d -r -s omori.apk -o omori_decompiled
+
+      - name: Replace APK Assets with Steam www Assets
+        run: |
+          GAME_DIR=$(find omori_decompiled/assets -name "index.html" -exec dirname {} \;)
+          echo "Target APK game root: $GAME_DIR"
+
+          # Overwrite APK assets with the downloaded Steam www assets
+          cp -r steam_assets/* "$GAME_DIR/"
 
       - name: Fetch Latest OneLoader Release
         run: |
@@ -40,35 +52,32 @@ jobs:
           curl -L -o oneloader.zip "$LATEST_URL"
           unzip oneloader.zip -d oneloader_files
 
-      - name: Inject OneLoader & Apply Mobile Load Fixes
+      - name: Inject OneLoader & Mobile Polyfills
         run: |
-          # Find directory containing index.html inside assets
           GAME_DIR=$(find omori_decompiled/assets -name "index.html" -exec dirname {} \;)
-          echo "Game root is: $GAME_DIR"
-
+          
           if [ -d "oneloader_files/www" ]; then
             SRC_DIR="oneloader_files/www"
           else
             SRC_DIR="oneloader_files"
           fi
 
-          # Copy OneLoader assets into game root
+          # Copy OneLoader files into the combined game root
           cp -r "$SRC_DIR"/* "$GAME_DIR"/
           mkdir -p "$GAME_DIR/mods"
 
-          # Fix 50% load freeze: Override Node environment check for Android Webview
+          # Create polyfill to handle NW.js / Node.js missing dependencies on Android
           cat << 'EOF' > "$GAME_DIR/modloader/mobile_fix.js"
           window.isNwjs = false;
           window.require = window.require || function(module) {
             return {
-              fs: {},
-              path: {},
+              fs: { readFileSync: function(){}, writeFileSync: function(){}, existsSync: function(){ return false; } },
+              path: { join: function(){ return ""; }, resolve: function(){ return ""; } },
               child_process: {}
             };
           };
           EOF
 
-          # Inject mobile fix script right before modloader main entry point in index.html
           VIEWPORT_META='<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">'
           LANDSCAPE_CSS="<style>html, body { width: 100vw; height: 100vh; margin: 0; padding: 0; overflow: hidden; background: #000; }</style>"
           FIX_SCRIPT='<script src="modloader/mobile_fix.js"></script>'
@@ -89,11 +98,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.0-${{ github.run_number }}
-          name: OMORI OneLoader Build #${{ github.run_number }}
+          name: OMORI OneLoader Steam Hybrid Build #${{ github.run_number }}
           body: |
-            Automated OMORI OneLoader build.
-            - Screen Display: Fullscreen Landscape
-            - Fixes: Mobile Webview polyfill for OneLoader 50% load freeze
+            Automated OMORI OneLoader build with Steam PC assets.
+            - Output File: `omori-oneloader.apk`
           files: omori-oneloader.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
