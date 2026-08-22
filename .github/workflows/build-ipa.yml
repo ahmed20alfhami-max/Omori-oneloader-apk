@@ -22,45 +22,45 @@ jobs:
       - name: Download Game Assets
         run: |
           URL="https://github.com/ahmed20alfhami-max/Omori-oneloader-apk/releases/download/v1.0/www.zip"
-          
-          # Download with curl following redirects explicitly
           curl -L -A "Mozilla/5.0" -o www.zip "$URL"
           
-          # Check size; if smaller than 1MB, retry with wget
           SIZE=$(wc -c <"www.zip" | tr -d ' ')
           if [ "$SIZE" -lt 1000000 ]; then
-            echo "curl failed or downloaded corrupt file ($SIZE bytes). Retrying with wget..."
             rm www.zip
             wget -O www.zip "$URL"
           fi
 
-          echo "Downloaded file size: $(ls -lh www.zip | awk '{print $5}')"
-          
           mkdir -p extracted
           unzip -q www.zip -d extracted/
 
-      - name: Create Cordova App & Add Platform
+      - name: Create Cordova App & Fix WKWebView CORS
         run: |
           cordova create omori-app com.omori.mobile "OMORI"
           cd omori-app
           
-          # Set Landscape Orientation
-          sed -i '' 's/<\/widget>/  <preference name="Orientation" value="landscape" \/>\n<\/widget>/g' config.xml
+          # Force Landscape & Enable Local Web Scheme to fix WKWebView CORS (stuck at 50%)
+          sed -i '' 's/<\/widget>/  <preference name="Orientation" value="landscape" \/>\n  <preference name="scheme" value="app" \/>\n  <preference name="hostname" value="localhost" \/>\n  <preference name="AllowUntrustedCerts" value="true" \/>\n  <preference name="InterceptRemoteRequests" value="all" \/>\n<\/widget>/g' config.xml
           
           cordova platform add ios
+
+      - name: Enable iTunes & Files App File Sharing
+        run: |
+          PLIST="omori-app/platforms/ios/OMORI/OMORI-Info.plist"
+          if [ -f "$PLIST" ]; then
+            /usr/libexec/PlistBuddy -c "Add :UIFileSharingEnabled bool true" "$PLIST" || /usr/libexec/PlistBuddy -c "Set :UIFileSharingEnabled true" "$PLIST"
+            /usr/libexec/PlistBuddy -c "Add :LSSupportsOpeningDocumentsInPlace bool true" "$PLIST" || /usr/libexec/PlistBuddy -c "Set :LSSupportsOpeningDocumentsInPlace true" "$PLIST"
+          fi
 
       - name: Overwrite Default Files with Game Assets
         run: |
           GAME_DIR=$(dirname $(find extracted -name "index.html" | head -n 1))
           
-          echo "Found index.html at: $GAME_DIR"
-          
-          # Disable touch input completely
+          # Disable touch input (Controller Only)
           if [ -f "$GAME_DIR/index.html" ]; then
             sed -i '' 's/<\/head>/<style>html, body { touch-action: none !important; -webkit-user-select: none; pointer-events: none !important; }<\/style><\/head>/g' "$GAME_DIR/index.html"
           fi
 
-          # Clear default Cordova placeholders and copy real game files
+          # Replace default Cordova templates
           rm -rf omori-app/www/*
           rm -rf omori-app/platforms/ios/www/*
           cp -R "$GAME_DIR"/* omori-app/www/
