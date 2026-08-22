@@ -1,0 +1,63 @@
+name: Build OMORI IPA from Link
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install Cordova
+        run: npm install -g cordova
+
+      - name: Download and Extract Game Assets
+        run: |
+          curl -L -o www.zip "https://github.com/ahmed20alfhami-max/Omori-oneloader-apk/releases/download/v1.0/www.zip"
+          mkdir -p www
+          unzip -q www.zip -d www/
+          # If the zip extracts into a nested folder named 'www', adjust accordingly. 
+          # Let's check or move contents if it double-nested:
+          if [ -d "www/www" ]; then
+            cp -r www/www/* www/
+            rm -rf www/www
+          fi
+
+      - name: Create Cordova App
+        run: |
+          cordova create omori-app com.omori.mobile "OMORI"
+          cd omori-app
+          cordova platform add ios
+
+      - name: Copy Game Assets to Cordova
+        run: |
+          rm -rf omori-app/www/*
+          cp -R www/* omori-app/www/
+
+      - name: Build iOS IPA
+        run: |
+          cd omori-app
+          cordova build ios --device --codeSignIdentity="" --codeSignRequirement=""
+
+      - name: Archive Payload into IPA
+        run: |
+          mkdir -p Payload
+          # Note: The build folder path can sometimes vary depending on cordova version, 
+          # usually it's under platforms/ios/build/device/ or emulator/
+          # Let's target the general build path:
+          find platforms/ios/build -name "*.app" -exec cp -r {} Payload/ \;
+          zip -r OMORI.ipa Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OMORI-IPA
+          path: OMORI.ipa
