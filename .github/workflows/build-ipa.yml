@@ -1,4 +1,4 @@
-name: Build OMORI IPA from Link
+name: Build OMORI IPA
 
 on:
   workflow_dispatch:
@@ -19,7 +19,7 @@ jobs:
       - name: Install Cordova
         run: npm install -g cordova
 
-      - name: Download and Extract Game Assets
+      - name: Download Game Assets
         run: |
           curl -L -o www.zip "https://github.com/ahmed20alfhami-max/Omori-oneloader-apk/releases/download/v1.0/www.zip"
           mkdir -p www
@@ -29,21 +29,39 @@ jobs:
             rm -rf www/www
           fi
 
+      - name: Configure Game Settings (Landscape & Disable Touch)
+        run: |
+          # Inject Landscape preference and disable touch overlays inside game index.html
+          if [ -f "www/index.html" ]; then
+            sed -i '' 's/<\/head>/<style>html, body { touch-action: none !important; -webkit-user-select: none; pointer-events: none !important; }<\/style><\/head>/g' www/index.html
+          fi
+
       - name: Create Cordova App
         run: |
           cordova create omori-app com.omori.mobile "OMORI"
           cd omori-app
+          
+          # Force landscape orientation in config.xml
+          sed -i '' 's/<\/widget>/  <preference name="Orientation" value="landscape" \/>\n<\/widget>/g' config.xml
+          
           cordova platform add ios
 
-      - name: Copy Game Assets to Cordova
+      - name: Copy Game Assets
         run: |
           rm -rf omori-app/www/*
           cp -R www/* omori-app/www/
 
-      - name: Build Simulator App (Bypasses Signing)
+      - name: Build iOS App with Xcode Direct Flags
         run: |
-          cd omori-app
-          cordova build ios --emulator
+          cd omori-app/platforms/ios
+          xcodebuild build \
+            -workspace OMORI.xcworkspace \
+            -scheme OMORI \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
 
       - name: Create IPA Package
         run: |
