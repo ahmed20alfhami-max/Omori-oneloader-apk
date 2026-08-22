@@ -19,51 +19,58 @@ jobs:
       - name: Install Cordova
         run: npm install -g cordova
 
-      - name: Download Game Assets
+      - name: Download and Extract Game Assets
         run: |
           curl -L -o www.zip "https://github.com/ahmed20alfhami-max/Omori-oneloader-apk/releases/download/v1.0/www.zip"
-          mkdir -p www
-          unzip -q www.zip -d www/
-          if [ -d "www/www" ]; then
-            cp -r www/www/* www/
-            rm -rf www/www
+          mkdir -p extracted
+          unzip -q www.zip -d extracted/
+          
+          # Ensure www contains the game assets directly
+          if [ -d "extracted/www" ]; then
+            mv extracted/www game_assets
+          else
+            mv extracted game_assets
           fi
 
-      - name: Configure Game Settings (Landscape & Disable Touch)
+      - name: Configure Touch & Landscape
         run: |
-          if [ -f "www/index.html" ]; then
-            sed -i '' 's/<\/head>/<style>html, body { touch-action: none !important; -webkit-user-select: none; pointer-events: none !important; }<\/style><\/head>/g' www/index.html
+          if [ -f "game_assets/index.html" ]; then
+            sed -i '' 's/<\/head>/<style>html, body { touch-action: none !important; -webkit-user-select: none; pointer-events: none !important; }<\/style><\/head>/g' game_assets/index.html
           fi
 
       - name: Create Cordova App
         run: |
           cordova create omori-app com.omori.mobile "OMORI"
           cd omori-app
+          
+          # Force landscape
           sed -i '' 's/<\/widget>/  <preference name="Orientation" value="landscape" \/>\n<\/widget>/g' config.xml
+          
           cordova platform add ios
 
       - name: Copy Game Assets
         run: |
           rm -rf omori-app/www/*
-          cp -R www/* omori-app/www/
+          cp -R game_assets/* omori-app/www/
 
-      - name: Build iOS App
+      - name: Build Real iOS Device Binary
         run: |
           cd omori-app/platforms/ios
           xcodebuild build \
             -workspace OMORI.xcworkspace \
             -scheme OMORI \
-            -sdk iphonesimulator \
-            -configuration Debug \
+            -sdk iphoneos \
+            -configuration Release \
             -derivedDataPath build \
-            CODE_SIGN_IDENTITY="" \
+            IPHONEOS_DEPLOYMENT_TARGET=12.0 \
+            CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGN_IDENTITY=""
 
       - name: Create IPA Package
         run: |
           mkdir -p Payload
-          cp -R omori-app/platforms/ios/build/Build/Products/Debug-iphonesimulator/OMORI.app Payload/
+          cp -R omori-app/platforms/ios/build/Build/Products/Release-iphoneos/OMORI.app Payload/
           zip -r OMORI.ipa Payload
 
       - name: Upload IPA Artifact
