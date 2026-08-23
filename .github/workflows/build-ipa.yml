@@ -1,10 +1,13 @@
-name: Build OMORI IPA
+name: Build and Release OMORI IPA
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
-  build-ios:
+  build-and-release:
     runs-on: macos-latest
 
     steps:
@@ -16,29 +19,49 @@ jobs:
         with:
           node-version: 18
 
-      - name: Install Cordova
+      - name: Install Cordova & Tools
         run: npm install -g cordova
 
-      - name: Download Game Assets
+      - name: Download and Unzip APK
         run: |
-          URL="https://github.com/ahmed20alfhami-max/Omori-oneloader-apk/releases/download/v1.0/www.zip"
-          curl -L -A "Mozilla/5.0" -o www.zip "$URL"
+          APK_URL="https://dl.apkvision.org/omori/OMORI-v1-0-8-1.apk"
+          echo "Downloading APK from APKVision..."
+          curl -L -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" -o omori.apk "$APK_URL"
           
-          SIZE=$(wc -c <"www.zip" | tr -d ' ')
-          if [ "$SIZE" -lt 1000000 ]; then
-            rm www.zip
-            wget -O www.zip "$URL"
+          echo "Unzipping APK contents..."
+          mkdir -p apk_extracted
+          unzip -q omori.apk -d apk_extracted/
+          
+          mkdir -p game_www
+          cp -R apk_extracted/assets/www/* game_www/
+
+      - name: Inject Opening Splash, Final Credits & Controller Setup
+        run: |
+          INDEX_FILE="game_www/index.html"
+          if [ -f "$INDEX_FILE" ]; then
+            # Style for Startup Splash & persistent bottom credits
+            SPLASH_STYLE="<style> \
+              html, body { touch-action: none !important; -webkit-user-select: none; pointer-events: none !important; } \
+              #startup-splash { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: #000000; display: flex; justify-content: center; align-items: center; z-index: 999999; animation: fadeOutSplash 3s forwards 2.5s; } \
+              #startup-text { color: #ffffff; font-size: 36px; font-weight: bold; text-align: center; font-family: sans-serif; text-shadow: 2px 2px 8px #000; } \
+              .custom-credit { position: fixed; bottom: 15px; width: 100%; text-align: center; color: #ffffff; font-size: 24px; font-weight: bold; text-shadow: 2px 2px 4px #000; z-index: 99999; pointer-events: none; } \
+              @keyframes fadeOutSplash { to { opacity: 0; visibility: hidden; } } \
+            </style>"
+            
+            SPLASH_HTML="<div id=\"startup-splash\"><div id=\"startup-text\">iOS port by ahmad alfhami</div></div><div class=\"custom-credit\">iOS port by ahmad alfhami</div>"
+            
+            sed -i '' "s/<\/head>/$SPLASH_STYLE<\/head>/g" "$INDEX_FILE"
+            sed -i '' "s/<\/body>/$SPLASH_HTML<\/body>/g" "$INDEX_FILE"
           fi
 
-          mkdir -p extracted
-          unzip -q www.zip -d extracted/
+          # Inject credits into RPG Maker JS engines
+          find game_www/js -name "*.js" -exec sed -i '' 's/OMORI/OMORI (iOS port by ahmad alfhami)/g' {} + || true
 
       - name: Create Cordova Project
         run: |
-          cordova create omori-app com.omori.mobile "OMORI"
+          cordova create omori-app omori.mobileahmed.com "OMORI"
           cd omori-app
           
-          # Force Landscape Orientation
           sed -i '' 's/<\/widget>/  <preference name="Orientation" value="landscape" \/>\n<\/widget>/g' config.xml
           
           cordova platform add ios
@@ -51,27 +74,18 @@ jobs:
             /usr/libexec/PlistBuddy -c "Add :LSSupportsOpeningDocumentsInPlace bool true" "$PLIST" || /usr/libexec/PlistBuddy -c "Set :LSSupportsOpeningDocumentsInPlace true" "$PLIST"
           fi
 
-      - name: Extract Assets Directly to App Root
+      - name: Overwrite Default Cordova Assets
         run: |
-          # Find directory containing index.html
-          INDEX_PATH=$(find extracted -name "index.html" | head -n 1)
-          GAME_DIR=$(dirname "$INDEX_PATH")
-
-          echo "Targeting index.html parent directory: $GAME_DIR"
-
-          # Disable Touch Inputs for Controller-Only Operation
-          if [ -f "$GAME_DIR/index.html" ]; then
-            sed -i '' 's/<\/head>/<style>html, body { touch-action: none !important; -webkit-user-select: none; pointer-events: none !important; }<\/style><\/head>/g' "$GAME_DIR/index.html"
-          fi
-
-          # Clear default Cordova files and place extracted assets
           rm -rf omori-app/www/*
           rm -rf omori-app/platforms/ios/www/*
-          
-          cp -R "$GAME_DIR"/* omori-app/www/
-          cp -R "$GAME_DIR"/* omori-app/platforms/ios/www/
+          cp -R game_www/* omori-app/www/
+          cp -R game_www/* omori-app/platforms/ios/www/
 
-      - name: Build iOS Executable
+          if [ -f "game_www/icon/icon.png" ]; then
+            cp game_www/icon/icon.png omori-app/platforms/ios/OMORI/Images.xcassets/AppIcon.appiconset/icon-60@2x.png
+          fi
+
+      - name: Build Real iOS Device Binary
         run: |
           cd omori-app/platforms/ios
           xcodebuild build \
@@ -89,10 +103,14 @@ jobs:
         run: |
           mkdir -p Payload
           cp -R omori-app/platforms/ios/build/Build/Products/Release-iphoneos/OMORI.app Payload/
-          zip -r OMORI.ipa Payload
+          zip -r omori.ipa Payload
 
-      - name: Upload IPA Artifact
-        uses: actions/upload-artifact@v4
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
         with:
-          name: OMORI-IPA
-          path: OMORI.ipa
+          tag_name: v1.0.8-ios
+          name: "OMORI iOS Port v1.0.8"
+          body: "iOS Port of OMORI v1.0.8 by ahmad alfhami."
+          files: omori.ipa
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
