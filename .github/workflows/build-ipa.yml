@@ -33,13 +33,13 @@ jobs:
           mkdir -p extracted
           unzip -q www.zip -d extracted/
 
-      - name: Create Cordova App & Fix WKWebView CORS
+      - name: Create Cordova Project
         run: |
           cordova create omori-app com.omori.mobile "OMORI"
           cd omori-app
           
-          # Force Landscape & Enable Local Web Scheme to fix WKWebView CORS (stuck at 50%)
-          sed -i '' 's/<\/widget>/  <preference name="Orientation" value="landscape" \/>\n  <preference name="scheme" value="app" \/>\n  <preference name="hostname" value="localhost" \/>\n  <preference name="AllowUntrustedCerts" value="true" \/>\n  <preference name="InterceptRemoteRequests" value="all" \/>\n<\/widget>/g' config.xml
+          # Force Landscape Orientation
+          sed -i '' 's/<\/widget>/  <preference name="Orientation" value="landscape" \/>\n<\/widget>/g' config.xml
           
           cordova platform add ios
 
@@ -51,22 +51,27 @@ jobs:
             /usr/libexec/PlistBuddy -c "Add :LSSupportsOpeningDocumentsInPlace bool true" "$PLIST" || /usr/libexec/PlistBuddy -c "Set :LSSupportsOpeningDocumentsInPlace true" "$PLIST"
           fi
 
-      - name: Overwrite Default Files with Game Assets
+      - name: Extract Assets Directly to App Root
         run: |
-          GAME_DIR=$(dirname $(find extracted -name "index.html" | head -n 1))
-          
-          # Disable touch input (Controller Only)
+          # Find directory containing index.html
+          INDEX_PATH=$(find extracted -name "index.html" | head -n 1)
+          GAME_DIR=$(dirname "$INDEX_PATH")
+
+          echo "Targeting index.html parent directory: $GAME_DIR"
+
+          # Disable Touch Inputs for Controller-Only Operation
           if [ -f "$GAME_DIR/index.html" ]; then
             sed -i '' 's/<\/head>/<style>html, body { touch-action: none !important; -webkit-user-select: none; pointer-events: none !important; }<\/style><\/head>/g' "$GAME_DIR/index.html"
           fi
 
-          # Replace default Cordova templates
+          # Clear default Cordova files and place extracted assets
           rm -rf omori-app/www/*
           rm -rf omori-app/platforms/ios/www/*
+          
           cp -R "$GAME_DIR"/* omori-app/www/
           cp -R "$GAME_DIR"/* omori-app/platforms/ios/www/
 
-      - name: Build Real iOS Device Binary
+      - name: Build iOS Executable
         run: |
           cd omori-app/platforms/ios
           xcodebuild build \
@@ -80,7 +85,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=""
 
-      - name: Create IPA Package
+      - name: Package IPA
         run: |
           mkdir -p Payload
           cp -R omori-app/platforms/ios/build/Build/Products/Release-iphoneos/OMORI.app Payload/
