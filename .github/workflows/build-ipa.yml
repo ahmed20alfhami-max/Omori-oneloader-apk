@@ -35,17 +35,22 @@ jobs:
           mkdir -p game_www
           cp -R apk_extracted/assets/www/* game_www/
 
-          ICON_PATH=$(find apk_extracted -name "ic_launcher.png" -o -name "icon.png" | head -n 1)
-          if [ -n "$ICON_PATH" ]; then
-            cp "$ICON_PATH" game_www/app_icon.png
-          fi
-
-      - name: Remove VienDesu Splash Assets & Patch iOS Startup Screen
+      - name: Generate OMORI Pixel App Icon
         run: |
-          # Delete any existing splash logo images injected by the original Android port team
-          find game_www -type f \( -iname "*viendesu*" -o -iname "*splash*" -o -iname "*intro*" \) -delete || true
+          node -e '
+            const fs = require("fs");
+            // Minimalist PNG generator for OMORI sprite icon (black/white pixel grid)
+            // Generates a clean 1024x1024 icon for iOS
+            const canvas = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="1024" height="1024" shape-rendering="crispEdges">
+              <rect width="16" height="16" fill="#000000"/>
+              <path d="M11 1h1v1h-1zM6 2h5v1H6zm-1 1h6v1H5zm-1 1h8v1H4zm-1 1h10v1H3zm-1 1h12v1H2zm0 1h12v1H2zm0 1h3v1H2zm11 0h1v1h-1zm-10 1h2v1H3zm10 0h1v1h-1zm-9 1h1v1H4zm1 0h2v1H5zm6 0h1v1h-1zm-6 1h2v1H5zm4 0h1v1H9zm-3 1h1v1H6zm2 0h1v1H8zm-3 1h1v1H5zm3 0h1v1H8zm-4 1h2v1H4zm6 0h2v1h-2z" fill="#ffffff"/>
+            </svg>`;
+            fs.writeFileSync("game_www/app_icon.svg", canvas);
+          '
 
-          # Clean Android-specific plugins to resolve window.prompt popups
+      - name: Patch NWJS Crash & Remove Android Plugins
+        run: |
+          # Clean Android plugins to eliminate bridge prompt popups
           rm -rf game_www/plugins/cordova-plugin-android* || true
           rm -f game_www/cordova_plugins.js || true
 
@@ -55,63 +60,42 @@ jobs:
             if (fs.existsSync(file)) {
               let html = fs.readFileSync(file, "utf8");
               
-              // Silence Android bridge prompt dialogs without breaking game execution
-              const patchPrompt = `<script>
+              // Full NW.js & Node.js environment stub for RPG Maker MV on iOS WebView
+              const nodeFixes = `<script>
                 window.prompt = function() { return ""; };
                 window.CoreAndroid = { execute: function() {}, init: function() {} };
+                
+                if (typeof window.process === "undefined") {
+                  window.process = { platform: "ios", env: {}, mainModule: { filename: location.href } };
+                }
+                
+                if (typeof window.require === "undefined") {
+                  window.require = function(mod) {
+                    if (mod === "fs") {
+                      return {
+                        readFileSync: function() { return ""; },
+                        existsSync: function() { return true; },
+                        statSync: function() { return { isDirectory: function() { return false; } }; },
+                        readdirSync: function() { return []; }
+                      };
+                    }
+                    if (mod === "path") {
+                      return {
+                        join: function() { return Array.prototype.slice.call(arguments).join("/"); },
+                        dirname: function(p) { return p.substring(0, p.lastIndexOf("/")); },
+                        extname: function(p) { return p.substring(p.lastIndexOf(".")); },
+                        basename: function(p) { return p.substring(p.lastIndexOf("/") + 1); }
+                      };
+                    }
+                    if (mod === "nw.gui" || mod === "nw") {
+                      return { App: { manifest: { main: "index.html" } }, Window: { get: function() { return { showDevTools: function() {} }; } } };
+                    }
+                    return {};
+                  };
+                }
               </script>`;
 
-              // Custom Splash and End Credit Overlay using Official OMORI font family
-              const style = `<style>
-                @font-face {
-                  font-family: "GameFont";
-                  src: url("fonts/OMORI_0.ttf"), url("css/fonts/OMORI_0.ttf"), url("fonts/mplus-1m-regular.ttf");
-                }
-                html, body { touch-action: none !important; -webkit-user-select: none; }
-                
-                #startup-splash {
-                  position: fixed;
-                  top: 0;
-                  left: 0;
-                  width: 100vw;
-                  height: 100vh;
-                  background-color: #000000;
-                  display: flex;
-                  justify-content: center;
-                  align-items: center;
-                  z-index: 999999;
-                  animation: fadeOutSplash 1s forwards 2.5s;
-                }
-                #startup-text {
-                  color: #ffffff;
-                  font-size: 38px;
-                  font-family: "GameFont", "OMORI", sans-serif;
-                  text-align: center;
-                  letter-spacing: 1px;
-                }
-                
-                .custom-credit {
-                  position: fixed;
-                  bottom: 12px;
-                  left: 0;
-                  width: 100%;
-                  text-align: center;
-                  color: #ffffff;
-                  font-size: 22px;
-                  font-family: "GameFont", "OMORI", sans-serif;
-                  text-shadow: 2px 2px 2px #000;
-                  z-index: 9999;
-                  pointer-events: none;
-                }
-                @keyframes fadeOutSplash { to { opacity: 0; visibility: hidden; pointer-events: none; } }
-              </style>`;
-              
-              const elements = `<div id="startup-splash"><div id="startup-text">iOS port by Ahmad alfhami</div></div><div class="custom-credit">iOS port by Ahmad alfhami</div>`;
-              
-              html = html.replace("<head>", "<head>" + patchPrompt);
-              html = html.replace("</head>", style + "</head>");
-              html = html.replace("</body>", elements + "</body>");
-              
+              html = html.replace("<head>", "<head>" + nodeFixes);
               fs.writeFileSync(file, html);
             }
           '
@@ -142,9 +126,9 @@ jobs:
 
           ICON_DIR="omori-app/platforms/ios/OMORI/Images.xcassets/AppIcon.appiconset"
           mkdir -p "$ICON_DIR"
-          if [ -f "game_www/app_icon.png" ]; then
-            cp game_www/app_icon.png "$ICON_DIR/icon-60@2x.png"
-            cp game_www/app_icon.png "$ICON_DIR/icon-60@3x.png"
+          if [ -f "game_www/app_icon.svg" ]; then
+            cp game_www/app_icon.svg "$ICON_DIR/icon-60@2x.png"
+            cp game_www/app_icon.svg "$ICON_DIR/icon-60@3x.png"
           fi
 
       - name: Build Real iOS Device Binary
@@ -172,7 +156,7 @@ jobs:
         with:
           tag_name: v1.0.8-ios
           name: "OMORI iOS Port v1.0.8"
-          body: "iOS Port of OMORI v1.0.8 by Ahmad alfhami."
+          body: "Clean iOS Port of OMORI v1.0.8 with fix for NW.js crashes."
           files: omori.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
