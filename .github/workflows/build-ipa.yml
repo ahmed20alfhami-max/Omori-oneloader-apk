@@ -35,6 +35,12 @@ jobs:
           mkdir -p game_www
           cp -R apk_extracted/assets/www/* game_www/
 
+          # Locate game icon from APK resources or www folder
+          ICON_PATH=$(find apk_extracted -name "ic_launcher.png" -o -name "icon.png" | head -n 1)
+          if [ -n "$ICON_PATH" ]; then
+            cp "$ICON_PATH" game_www/app_icon.png
+          fi
+
       - name: Inject Opening Splash, Final Credits & Controller Setup
         run: |
           node -e '
@@ -77,15 +83,19 @@ jobs:
             /usr/libexec/PlistBuddy -c "Add :LSSupportsOpeningDocumentsInPlace bool true" "$PLIST" || /usr/libexec/PlistBuddy -c "Set :LSSupportsOpeningDocumentsInPlace true" "$PLIST"
           fi
 
-      - name: Overwrite Default Cordova Assets
+      - name: Overwrite Default Cordova Assets & Set App Icon
         run: |
           rm -rf omori-app/www/*
           rm -rf omori-app/platforms/ios/www/*
           cp -R game_www/* omori-app/www/
           cp -R game_www/* omori-app/platforms/ios/www/
 
-          if [ -f "game_www/icon/icon.png" ]; then
-            cp game_www/icon/icon.png omori-app/platforms/ios/OMORI/Images.xcassets/AppIcon.appiconset/icon-60@2x.png
+          # Safely write app icon into Xcode assets folder
+          ICON_DIR="omori-app/platforms/ios/OMORI/Images.xcassets/AppIcon.appiconset"
+          mkdir -p "$ICON_DIR"
+          if [ -f "game_www/app_icon.png" ]; then
+            cp game_www/app_icon.png "$ICON_DIR/icon-60@2x.png"
+            cp game_www/app_icon.png "$ICON_DIR/icon-60@3x.png"
           fi
 
       - name: Build Real iOS Device Binary
