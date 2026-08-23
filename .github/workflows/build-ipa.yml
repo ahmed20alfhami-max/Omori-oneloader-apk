@@ -40,9 +40,12 @@ jobs:
             cp "$ICON_PATH" game_www/app_icon.png
           fi
 
-      - name: Fix Node fs.readFileSync for iOS & Set Up OMORI Font Credits
+      - name: Remove VienDesu Splash Assets & Patch iOS Startup Screen
         run: |
-          # Remove Android plugins to stop CoreAndroid prompt dialogs
+          # Delete any existing splash logo images injected by the original Android port team
+          find game_www -type f \( -iname "*viendesu*" -o -iname "*splash*" -o -iname "*intro*" \) -delete || true
+
+          # Clean Android-specific plugins to resolve window.prompt popups
           rm -rf game_www/plugins/cordova-plugin-android* || true
           rm -f game_www/cordova_plugins.js || true
 
@@ -52,48 +55,20 @@ jobs:
             if (fs.existsSync(file)) {
               let html = fs.readFileSync(file, "utf8");
               
-              // Polyfill Node.js fs.readFileSync, require, and process for RPG Maker MV on iOS
-              const browserPolyfills = `<script>
+              // Silence Android bridge prompt dialogs without breaking game execution
+              const patchPrompt = `<script>
                 window.prompt = function() { return ""; };
                 window.CoreAndroid = { execute: function() {}, init: function() {} };
-                
-                if (typeof window.process === "undefined") {
-                  window.process = { platform: "ios", env: {}, mainModule: { filename: location.href } };
-                }
-                if (typeof window.require === "undefined") {
-                  window.require = function(mod) {
-                    if (mod === "fs") {
-                      return {
-                        readFileSync: function(filePath, encoding) {
-                          var xhr = new XMLHttpRequest();
-                          xhr.open("GET", filePath, false);
-                          xhr.send(null);
-                          if (xhr.status === 200 || xhr.status === 0) {
-                            return xhr.responseText;
-                          }
-                          return "";
-                        },
-                        existsSync: function(path) { return true; },
-                        statSync: function() { return { isDirectory: function() { return false; } }; }
-                      };
-                    }
-                    if (mod === "path") {
-                      return {
-                        join: function() { return Array.prototype.slice.call(arguments).join("/"); },
-                        dirname: function(p) { return p.substring(0, p.lastIndexOf("/")); }
-                      };
-                    }
-                    return {};
-                  };
-                }
               </script>`;
 
+              // Custom Splash and End Credit Overlay using Official OMORI font family
               const style = `<style>
                 @font-face {
                   font-family: "GameFont";
                   src: url("fonts/OMORI_0.ttf"), url("css/fonts/OMORI_0.ttf"), url("fonts/mplus-1m-regular.ttf");
                 }
-                html, body { touch-action: none !important; -webkit-user-select: none; pointer-events: none !important; }
+                html, body { touch-action: none !important; -webkit-user-select: none; }
+                
                 #startup-splash {
                   position: fixed;
                   top: 0;
@@ -105,36 +80,35 @@ jobs:
                   justify-content: center;
                   align-items: center;
                   z-index: 999999;
-                  animation: fadeOutSplash 3.5s forwards 2.5s;
+                  animation: fadeOutSplash 1s forwards 2.5s;
                 }
                 #startup-text {
                   color: #ffffff;
-                  font-size: 32px;
+                  font-size: 38px;
                   font-family: "GameFont", "OMORI", sans-serif;
                   text-align: center;
                   letter-spacing: 1px;
-                  text-shadow: 2px 2px 0px #000;
                 }
+                
                 .custom-credit {
                   position: fixed;
-                  bottom: 10px;
+                  bottom: 12px;
                   left: 0;
                   width: 100%;
                   text-align: center;
                   color: #ffffff;
-                  font-size: 20px;
+                  font-size: 22px;
                   font-family: "GameFont", "OMORI", sans-serif;
-                  letter-spacing: 1px;
-                  text-shadow: 2px 2px 4px #000;
-                  z-index: 99999;
+                  text-shadow: 2px 2px 2px #000;
+                  z-index: 9999;
                   pointer-events: none;
                 }
-                @keyframes fadeOutSplash { to { opacity: 0; visibility: hidden; } }
+                @keyframes fadeOutSplash { to { opacity: 0; visibility: hidden; pointer-events: none; } }
               </style>`;
               
-              const elements = `<div id="startup-splash"><div id="startup-text">iOS port by ahmad alfhami</div></div><div class="custom-credit">iOS port by ahmad alfhami</div>`;
+              const elements = `<div id="startup-splash"><div id="startup-text">iOS port by Ahmad alfhami</div></div><div class="custom-credit">iOS port by Ahmad alfhami</div>`;
               
-              html = html.replace("<head>", "<head>" + browserPolyfills);
+              html = html.replace("<head>", "<head>" + patchPrompt);
               html = html.replace("</head>", style + "</head>");
               html = html.replace("</body>", elements + "</body>");
               
@@ -198,7 +172,7 @@ jobs:
         with:
           tag_name: v1.0.8-ios
           name: "OMORI iOS Port v1.0.8"
-          body: "iOS Port of OMORI v1.0.8 by ahmad alfhami."
+          body: "iOS Port of OMORI v1.0.8 by Ahmad alfhami."
           files: omori.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
