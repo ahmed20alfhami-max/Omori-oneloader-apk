@@ -35,20 +35,29 @@ jobs:
           mkdir -p game_www
           cp -R apk_extracted/assets/www/* game_www/
 
-          # Locate game icon from APK resources or www folder
           ICON_PATH=$(find apk_extracted -name "ic_launcher.png" -o -name "icon.png" | head -n 1)
           if [ -n "$ICON_PATH" ]; then
             cp "$ICON_PATH" game_www/app_icon.png
           fi
 
-      - name: Inject Opening Splash, Final Credits & Controller Setup
+      - name: Strip Android Plugins & Block Prompt Dialogs
         run: |
+          # Remove Android-specific Cordova JS plugins to prevent CoreAndroid execution
+          rm -rf game_www/plugins/cordova-plugin-android* || true
+          rm -f game_www/cordova_plugins.js || true
+
           node -e '
             const fs = require("fs");
             const file = "game_www/index.html";
             if (fs.existsSync(file)) {
               let html = fs.readFileSync(file, "utf8");
               
+              // Kill window.prompt globally to prevent any gap_init / CoreAndroid dialog popups
+              const suppressPromptsScript = `<script>
+                window.prompt = function() { return ""; };
+                window.CoreAndroid = { execute: function() {}, init: function() {} };
+              </script>`;
+
               const style = `<style>
                 html, body { touch-action: none !important; -webkit-user-select: none; pointer-events: none !important; }
                 #startup-splash { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: #000000; display: flex; justify-content: center; align-items: center; z-index: 999999; animation: fadeOutSplash 3s forwards 2.5s; }
@@ -59,6 +68,7 @@ jobs:
               
               const elements = `<div id="startup-splash"><div id="startup-text">iOS port by ahmad alfhami</div></div><div class="custom-credit">iOS port by ahmad alfhami</div>`;
               
+              html = html.replace("<head>", "<head>" + suppressPromptsScript);
               html = html.replace("</head>", style + "</head>");
               html = html.replace("</body>", elements + "</body>");
               
@@ -71,7 +81,7 @@ jobs:
           cordova create omori-app omori.mobileahmed.com "OMORI"
           cd omori-app
           
-          sed -i '' 's/<\/widget>/  <preference name="Orientation" value="landscape" \/>\n<\/widget>/g' config.xml
+          sed -i '' 's/<\/widget>/  <preference name="Orientation" value="landscape" \/>\n  <preference name="AllowBackForwardNavigationGestures" value="false" \/>\n  <preference name="CordovaWebViewEngine" value="CDVWKWebViewEngine" \/>\n<\/widget>/g' config.xml
           
           cordova platform add ios
 
@@ -90,7 +100,6 @@ jobs:
           cp -R game_www/* omori-app/www/
           cp -R game_www/* omori-app/platforms/ios/www/
 
-          # Safely write app icon into Xcode assets folder
           ICON_DIR="omori-app/platforms/ios/OMORI/Images.xcassets/AppIcon.appiconset"
           mkdir -p "$ICON_DIR"
           if [ -f "game_www/app_icon.png" ]; then
