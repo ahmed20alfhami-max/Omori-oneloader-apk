@@ -37,23 +37,28 @@ jobs:
 
       - name: Inject Opening Splash, Final Credits & Controller Setup
         run: |
-          INDEX_FILE="game_www/index.html"
-          if [ -f "$INDEX_FILE" ]; then
-            SPLASH_STYLE="<style> \
-              html, body { touch-action: none !important; -webkit-user-select: none; pointer-events: none !important; } \
-              #startup-splash { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: #000000; display: flex; justify-content: center; align-items: center; z-index: 999999; animation: fadeOutSplash 3s forwards 2.5s; } \
-              #startup-text { color: #ffffff; font-size: 36px; font-weight: bold; text-align: center; font-family: sans-serif; text-shadow: 2px 2px 8px #000; } \
-              .custom-credit { position: fixed; bottom: 15px; width: 100%; text-align: center; color: #ffffff; font-size: 24px; font-weight: bold; text-shadow: 2px 2px 4px #000; z-index: 99999; pointer-events: none; } \
-              @keyframes fadeOutSplash { to { opacity: 0; visibility: hidden; } } \
-            </style>"
-            
-            SPLASH_HTML="<div id=\"startup-splash\"><div id=\"startup-text\">iOS port by ahmad alfhami</div></div><div class=\"custom-credit\">iOS port by ahmad alfhami</div>"
-            
-            sed -i '' "s/<\/head>/$SPLASH_STYLE<\/head>/g" "$INDEX_FILE"
-            sed -i '' "s/<\/body>/$SPLASH_HTML<\/body>/g" "$INDEX_FILE"
-          fi
-
-          find game_www/js -name "*.js" -exec sed -i '' 's/OMORI/OMORI (iOS port by ahmad alfhami)/g' {} + || true
+          node -e '
+            const fs = require("fs");
+            const file = "game_www/index.html";
+            if (fs.existsSync(file)) {
+              let html = fs.readFileSync(file, "utf8");
+              
+              const style = `<style>
+                html, body { touch-action: none !important; -webkit-user-select: none; pointer-events: none !important; }
+                #startup-splash { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: #000000; display: flex; justify-content: center; align-items: center; z-index: 999999; animation: fadeOutSplash 3s forwards 2.5s; }
+                #startup-text { color: #ffffff; font-size: 36px; font-weight: bold; text-align: center; font-family: sans-serif; text-shadow: 2px 2px 8px #000; }
+                .custom-credit { position: fixed; bottom: 15px; width: 100%; text-align: center; color: #ffffff; font-size: 24px; font-weight: bold; text-shadow: 2px 2px 4px #000; z-index: 99999; pointer-events: none; }
+                @keyframes fadeOutSplash { to { opacity: 0; visibility: hidden; } }
+              </style>`;
+              
+              const elements = `<div id="startup-splash"><div id="startup-text">iOS port by ahmad alfhami</div></div><div class="custom-credit">iOS port by ahmad alfhami</div>`;
+              
+              html = html.replace("</head>", style + "</head>");
+              html = html.replace("</body>", elements + "</body>");
+              
+              fs.writeFileSync(file, html);
+            }
+          '
 
       - name: Create Cordova Project
         run: |
