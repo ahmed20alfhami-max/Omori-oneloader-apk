@@ -28,9 +28,9 @@ jobs:
           echo "Downloading APK from APKVision..."
           curl -L -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" -o omori.apk "$APK_URL"
           
-          echo "Unzipping APK contents..."
+          echo "Unzipping APK contents non-interactively..."
           mkdir -p apk_extracted
-          unzip -q omori.apk -d apk_extracted/
+          unzip -o -q omori.apk -d apk_extracted/
           
           mkdir -p game_www
           cp -R apk_extracted/assets/www/* game_www/
@@ -39,7 +39,6 @@ jobs:
         run: |
           INDEX_FILE="game_www/index.html"
           if [ -f "$INDEX_FILE" ]; then
-            # Style for Startup Splash & persistent bottom credits
             SPLASH_STYLE="<style> \
               html, body { touch-action: none !important; -webkit-user-select: none; pointer-events: none !important; } \
               #startup-splash { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: #000000; display: flex; justify-content: center; align-items: center; z-index: 999999; animation: fadeOutSplash 3s forwards 2.5s; } \
@@ -54,7 +53,6 @@ jobs:
             sed -i '' "s/<\/body>/$SPLASH_HTML<\/body>/g" "$INDEX_FILE"
           fi
 
-          # Inject credits into RPG Maker JS engines
           find game_www/js -name "*.js" -exec sed -i '' 's/OMORI/OMORI (iOS port by ahmad alfhami)/g' {} + || true
 
       - name: Create Cordova Project
